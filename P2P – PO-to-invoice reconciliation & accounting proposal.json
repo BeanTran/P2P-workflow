@@ -1,0 +1,1778 @@
+{
+  "name": "P2P: Đối chiếu PO – hóa đơn & đề xuất hạch toán",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Import đơn đặt hàng (PO)",
+        "formDescription": "Tải file PO (PDF hoặc ảnh). AI sẽ đọc các thông tin chính và lưu vào Google Sheet để đối chiếu khi có hóa đơn.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "File PO",
+              "fieldType": "file",
+              "fieldName": "po_file",
+              "acceptFileTypes": ".pdf,.png,.jpg,.jpeg",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Ghi chú",
+              "fieldType": "textarea",
+              "fieldName": "ghi_chu"
+            }
+          ]
+        },
+        "options": {
+          "buttonLabel": "Import PO",
+          "path": "import-po",
+          "respondWithOptions": {
+            "values": {
+              "formSubmittedText": "Đã nhận PO. Thông tin sẽ xuất hiện trong sheet \"PO\" sau ít phút."
+            }
+          }
+        }
+      },
+      "id": "e24213aa-f2c3-48fc-9eb0-bd97f2339648",
+      "name": "Tải lên PO",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "31d12daf-7cbf-40ca-b653-ed79672fcc56"
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = [];\n\nfor (const item of $input.all()) {\n  const bin = item.binary || {};\n\n  for (const key of Object.keys(bin)) {\n    const file = bin[key];\n    const mime = String(file.mimeType || '').toLowerCase();\n\n    if (!mime.includes('pdf') && !mime.startsWith('image/')) {\n      continue;\n    }\n\n    out.push({\n      json: {\n        ghiChu: item.json?.ghi_chu || '',\n        submittedAt: item.json?.submittedAt || '',\n        fileName: file.fileName || key,\n        mimeType: mime,\n        isPdf: mime.includes('pdf'),\n      },\n      binary: {\n        data: file,\n      },\n    });\n  }\n}\n\nreturn out;"
+      },
+      "id": "49ff39c3-ea77-4415-96e5-7f897ca40468",
+      "name": "Chuẩn hoá file PO",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.isPdf }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b645edf6-02c1-4d93-b6d5-c8f61dc1da7d",
+      "name": "PO là PDF?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        496,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {
+          "joinPages": true
+        }
+      },
+      "id": "9e12dd18-c5ae-4286-a4c4-918272a2e54a",
+      "name": "Đọc chữ PDF PO",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.2,
+      "position": [
+        784,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "p1",
+              "name": "text",
+              "type": "string",
+              "value": "={{ String($json.text || '').slice(0, 60000) }}"
+            },
+            {
+              "id": "p2",
+              "name": "fileName",
+              "type": "string",
+              "value": "={{ $('Chuẩn hoá file PO').item.json.fileName }}"
+            },
+            {
+              "id": "p3",
+              "name": "ghiChu",
+              "type": "string",
+              "value": "={{ $('Chuẩn hoá file PO').item.json.ghiChu }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a9e3b0a6-d0c3-4813-8fd8-dbfb9c8c26cd",
+      "name": "Nội dung PO",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1072,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ 'NỘI DUNG PO:' + String.fromCharCode(10) + $json.text }}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "Bạn là kế toán mua hàng (P2P). Đọc nội dung đơn đặt hàng (Purchase Order) và trích xuất thông tin chính.\nQuy tắc:\n- Chỉ dùng thông tin có trong chứng từ, không bịa. Trường không có thì để chuỗi rỗng hoặc 0.\n- Ngày theo định dạng YYYY-MM-DD.\n- Số tiền là số thuần (không dấu chấm/phẩy phân cách hàng nghìn, không ký hiệu tiền tệ).\n- mst_nha_cung_cap chỉ gồm chữ số và dấu gạch ngang.\n- thue_suat_vat là phần trăm (vd 8, 10).\n- Liệt kê đầy đủ từng dòng hàng hóa/dịch vụ."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "id": "11cd5376-720a-4768-8b90-348fb1d55b6c",
+      "name": "AI trích xuất thông tin PO",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1776,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5.4-mini",
+          "cachedResultName": "gpt-5.4-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "id": "ecc3e34e-973f-4243-84ec-f684282c5f35",
+      "name": "Model trích xuất PO",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1792,
+        304
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": null,
+          "name": "Gateway credits",
+          "__aiGatewayManaged": true
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"so_po\": \"PO-2026-001\",\n  \"ngay_po\": \"2026-11-20\",\n  \"nha_cung_cap\": \"Công ty TNHH ABC\",\n  \"mst_nha_cung_cap\": \"0312345678\",\n  \"dia_chi_nha_cung_cap\": \"123 Lê Lợi, Q1, TP.HCM\",\n  \"dieu_khoan_thanh_toan\": \"30 ngày kể từ ngày nhận hóa đơn\",\n  \"ngay_giao_hang\": \"2026-11-30\",\n  \"dia_diem_giao_hang\": \"Kho Bình Dương\",\n  \"tien_te\": \"VND\",\n  \"hang_hoa\": [\n    { \"ma_hang\": \"SP01\", \"mo_ta\": \"Giấy A4\", \"don_vi\": \"Thùng\", \"so_luong\": 10, \"don_gia\": 500000, \"thanh_tien\": 5000000 }\n  ],\n  \"tong_tien_truoc_thue\": 5000000,\n  \"thue_suat_vat\": 10,\n  \"tien_thue_vat\": 500000,\n  \"tong_tien_thanh_toan\": 5500000,\n  \"ghi_chu\": \"\"\n}"
+      },
+      "id": "02c9e3b9-b841-4f82-85ff-0bc84462e2cc",
+      "name": "Cấu trúc PO",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1920,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "r1",
+              "name": "Số PO",
+              "type": "string",
+              "value": "={{ $json.output.so_po }}"
+            },
+            {
+              "id": "r2",
+              "name": "Ngày PO",
+              "type": "string",
+              "value": "={{ $json.output.ngay_po }}"
+            },
+            {
+              "id": "r3",
+              "name": "Nhà cung cấp",
+              "type": "string",
+              "value": "={{ $json.output.nha_cung_cap }}"
+            },
+            {
+              "id": "r4",
+              "name": "MST NCC",
+              "type": "string",
+              "value": "={{ $json.output.mst_nha_cung_cap }}"
+            },
+            {
+              "id": "r5",
+              "name": "Địa chỉ NCC",
+              "type": "string",
+              "value": "={{ $json.output.dia_chi_nha_cung_cap }}"
+            },
+            {
+              "id": "r6",
+              "name": "Điều khoản thanh toán",
+              "type": "string",
+              "value": "={{ $json.output.dieu_khoan_thanh_toan }}"
+            },
+            {
+              "id": "r7",
+              "name": "Ngày giao hàng",
+              "type": "string",
+              "value": "={{ $json.output.ngay_giao_hang }}"
+            },
+            {
+              "id": "r8",
+              "name": "Địa điểm giao hàng",
+              "type": "string",
+              "value": "={{ $json.output.dia_diem_giao_hang }}"
+            },
+            {
+              "id": "r9",
+              "name": "Tiền tệ",
+              "type": "string",
+              "value": "={{ $json.output.tien_te }}"
+            },
+            {
+              "id": "r10",
+              "name": "Tổng trước thuế",
+              "type": "number",
+              "value": "={{ Number($json.output.tong_tien_truoc_thue) || 0 }}"
+            },
+            {
+              "id": "r11",
+              "name": "Thuế suất VAT (%)",
+              "type": "number",
+              "value": "={{ Number($json.output.thue_suat_vat) || 0 }}"
+            },
+            {
+              "id": "r12",
+              "name": "Tiền thuế VAT",
+              "type": "number",
+              "value": "={{ Number($json.output.tien_thue_vat) || 0 }}"
+            },
+            {
+              "id": "r13",
+              "name": "Tổng thanh toán",
+              "type": "number",
+              "value": "={{ Number($json.output.tong_tien_thanh_toan) || 0 }}"
+            },
+            {
+              "id": "r14",
+              "name": "Hàng hóa",
+              "type": "string",
+              "value": "={{ ($json.output.hang_hoa || []).map((h, i) => (i + 1) + '. ' + h.mo_ta + ' | SL ' + h.so_luong + ' ' + (h.don_vi || '') + ' x ' + h.don_gia + ' = ' + h.thanh_tien).join(String.fromCharCode(10)) }}"
+            },
+            {
+              "id": "r15",
+              "name": "Hàng hóa (JSON)",
+              "type": "string",
+              "value": "={{ JSON.stringify($json.output.hang_hoa || []) }}"
+            },
+            {
+              "id": "r16",
+              "name": "Ghi chú",
+              "type": "string",
+              "value": "={{ [$json.output.ghi_chu, $('Nội dung PO').item.json.ghiChu].filter(Boolean).join(' | ') }}"
+            },
+            {
+              "id": "r17",
+              "name": "Tên file",
+              "type": "string",
+              "value": "={{ $('Nội dung PO').item.json.fileName }}"
+            },
+            {
+              "id": "r18",
+              "name": "Ngày import",
+              "type": "string",
+              "value": "={{ $now.toFormat('yyyy-MM-dd HH:mm') }}"
+            },
+            {
+              "id": "r19",
+              "name": "Trạng thái",
+              "type": "string",
+              "value": "Chờ hóa đơn"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7c463ca4-2a3e-4fa3-b3a7-955d7ab2a3b5",
+      "name": "Định dạng dòng PO",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        2128,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1TZ6hIhJLFSd5q5ghe6Bn6lBSOxzYRR1zyrH-_gsx26M/edit?gid=0#gid=0",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "PO"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "8acf9aa0-c5c9-4a04-8f20-f8d413b22899",
+      "name": "Lưu PO vào Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2352,
+        80
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GJZPLR5omAjiIYLH",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ \"\" }}Chép lại chính xác và đầy đủ toàn bộ chữ, số, bảng biểu trong ảnh chứng từ này dưới dạng văn bản thuần. Giữ nguyên số liệu, không tóm tắt, không thêm bình luận.",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "HumanMessagePromptTemplate",
+              "messageType": "imageBinary",
+              "imageDetail": "high"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "id": "4c4b0f32-8f49-463b-903d-7e5c364adac2",
+      "name": "Đọc chữ ảnh PO",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        720,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5.4-mini",
+          "cachedResultName": "gpt-5.4-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "id": "01b70f4d-e98b-49db-ae33-273c516db691",
+      "name": "Model đọc ảnh PO",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        800,
+        656
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": null,
+          "name": "Gateway credits",
+          "__aiGatewayManaged": true
+        }
+      }
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "maxResults": "={{ 20 }}",
+        "filters": {
+          "q": "has:attachment (subject:\"hóa đơn\" OR subject:\"hoá đơn\" OR subject:invoice OR subject:HĐ)",
+          "readStatus": "unread"
+        },
+        "options": {
+          "dataPropertyAttachmentsPrefixName": "attachment_",
+          "downloadAttachments": true
+        }
+      },
+      "id": "9bd4b73b-71d6-4452-ae37-326dcca2f673",
+      "name": "Email hóa đơn mới",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        224
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Hwx8cy1L0aPTxLHZ",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst out = [];\n\nfor (const item of $input.all()) {\n  const bin = item.binary || {};\n  const j = item.json || {};\n\n  const emailMeta = {\n    emailId: j.id,\n    emailSubject: j.subject || '',\n    emailFrom: j.from?.value?.[0]?.address || '',\n    emailDate: j.date || '',\n  };\n\n  for (const key of Object.keys(bin)) {\n    const file = bin[key];\n    const mime = String(file.mimeType || '').toLowerCase();\n\n    if (!mime.includes('pdf') && !mime.startsWith('image/')) {\n      continue;\n    }\n\n    out.push({\n      json: {\n        ...emailMeta,\n        fileName: file.fileName || key,\n        mimeType: mime,\n        isPdf: mime.includes('pdf'),\n      },\n      binary: {\n        data: file,\n      },\n    });\n  }\n}\n\nreturn out;\n"
+      },
+      "id": "53764e42-7f53-424e-ad6c-9b84c139c098",
+      "name": "Chuẩn hoá file hóa đơn",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        144,
+        1184
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.isPdf }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e054cefb-80cd-4bbf-900c-d68e67c2b23a",
+      "name": "Hóa đơn là PDF?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        368,
+        1184
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {
+          "joinPages": true
+        }
+      },
+      "id": "8f706fff-d1ff-4959-a4d1-75f2c0639a88",
+      "name": "Đọc chữ PDF hóa đơn",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.2,
+      "position": [
+        656,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "i1",
+              "name": "text",
+              "type": "string",
+              "value": "={{ String($json.text || '').slice(0, 60000) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2995eae5-858f-4086-b3ff-c277e4cd8dc5",
+      "name": "Nội dung hóa đơn",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        944,
+        1184
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=={{ 'Tiêu đề email: ' + $('Chuẩn hoá file hóa đơn').item.json.emailSubject + String.fromCharCode(10) + 'NỘI DUNG HÓA ĐƠN:' + String.fromCharCode(10) + $json.text }}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "Bạn là kế toán công nợ phải trả. Đọc nội dung hóa đơn GTGT/hóa đơn bán hàng của nhà cung cấp và trích xuất thông tin chính.\nQuy tắc:\n- Chỉ dùng thông tin có trong chứng từ, không bịa. Trường không có thì để chuỗi rỗng hoặc 0.\n- so_po_tham_chieu: số PO/đơn đặt hàng nếu xuất hiện trên hóa đơn hoặc tiêu đề email, không có thì để rỗng.\n- Ngày theo định dạng YYYY-MM-DD. Số tiền là số thuần, không dấu phân cách, không ký hiệu tiền tệ.\n- mst_nha_cung_cap là MST của BÊN BÁN (không phải bên mua).\n- Liệt kê đầy đủ từng dòng hàng hóa/dịch vụ."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "id": "42d9c42c-c2d4-4fc5-8e87-00ec864134dd",
+      "name": "AI trích xuất hóa đơn",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1168,
+        1184
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5.4-mini",
+          "cachedResultName": "gpt-5.4-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "id": "c5b1e919-bd01-4e07-a876-16a31b677fcb",
+      "name": "Model đọc hóa đơn",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        672,
+        1568
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": null,
+          "name": "Gateway credits",
+          "__aiGatewayManaged": true
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"so_hoa_don\": \"0001234\",\n  \"ky_hieu_hoa_don\": \"1C26TAA\",\n  \"ngay_hoa_don\": \"2026-11-22\",\n  \"nha_cung_cap\": \"Công ty TNHH ABC\",\n  \"mst_nha_cung_cap\": \"0312345678\",\n  \"so_po_tham_chieu\": \"PO-2026-001\",\n  \"tien_te\": \"VND\",\n  \"hang_hoa\": [\n    { \"mo_ta\": \"Giấy A4\", \"don_vi\": \"Thùng\", \"so_luong\": 10, \"don_gia\": 500000, \"thanh_tien\": 5000000 }\n  ],\n  \"tong_tien_truoc_thue\": 5000000,\n  \"thue_suat_vat\": 10,\n  \"tien_thue_vat\": 500000,\n  \"tong_tien_thanh_toan\": 5500000,\n  \"han_thanh_toan\": \"2026-12-22\"\n}"
+      },
+      "id": "c5c76920-5443-499b-b25b-cee630853b44",
+      "name": "Cấu trúc hóa đơn",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1248,
+        1408
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1TZ6hIhJLFSd5q5ghe6Bn6lBSOxzYRR1zyrH-_gsx26M/edit?usp=sharing",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "PO",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "6e7f6389-7702-4104-9ecf-4501880bd74e",
+      "name": "Đọc danh sách PO",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1776,
+        1552
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GJZPLR5omAjiIYLH",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const inv = $('AI trích xuất hóa đơn').first().json.output || {};\nconst src = $('Chuẩn hoá file hóa đơn').first().json;\nconst norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9]/g, '');\nconst stripCo = (s) => norm(s).replace(/congty|tnhh|cophan|ctcp|mtv|trachnhiemhuuhan/g, '');\nconst rows = $input.all().map((i) => i.json).filter((r) => r && Object.keys(r).length > 0 && r['Số PO'] !== undefined);\nconst open = (r) => !String(r['Trạng thái'] || '').toLowerCase().includes('đã đóng');\nlet match = null;\nlet how = '';\nif (inv.so_po_tham_chieu) {\n  match = rows.find((r) => norm(r['Số PO']) && norm(r['Số PO']) === norm(inv.so_po_tham_chieu));\n  if (match) how = 'Theo số PO trên hóa đơn';\n}\nif (!match && inv.mst_nha_cung_cap) {\n  const c = rows.filter((r) => open(r) && norm(r['MST NCC']) && norm(r['MST NCC']) === norm(inv.mst_nha_cung_cap));\n  if (c.length) { match = c[c.length - 1]; how = c.length > 1 ? 'Theo MST NCC (PO mới nhất trong ' + c.length + ' PO)' : 'Theo MST NCC'; }\n}\nif (!match && inv.nha_cung_cap) {\n  const key = stripCo(inv.nha_cung_cap);\n  const c = rows.filter((r) => open(r) && key && stripCo(r['Nhà cung cấp']) === key);\n  if (c.length) { match = c[c.length - 1]; how = 'Theo tên nhà cung cấp'; }\n}\nreturn [{ json: { invoice: inv, email: { id: src.emailId, subject: src.emailSubject, from: src.emailFrom, fileName: src.fileName }, po: match, poFound: !!match, cachKhop: match ? how : 'Không tìm thấy PO' } }];"
+      },
+      "id": "0d716755-9ae9-4251-b1c2-425f8114d643",
+      "name": "Tìm PO tương ứng",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        1552
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ 'CÁCH TÌM PO: ' + $json.cachKhop + String.fromCharCode(10) + 'PO (từ Google Sheet): ' + JSON.stringify($json.po) + String.fromCharCode(10) + String.fromCharCode(10) + 'HÓA ĐƠN: ' + JSON.stringify($json.invoice) }}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "Bạn là kế toán công nợ phải trả, thực hiện đối chiếu hóa đơn nhà cung cấp với đơn đặt hàng (PO).\nQuy tắc:\n- Nếu PO là null: trang_thai = \"Không tìm thấy PO\", chenh_lech_tong_tien = 0, giải thích ngắn trong chi_tiet_chenh_lech.\n- So sánh: nhà cung cấp/MST, từng dòng hàng (mô tả tương đương, số lượng, đơn giá, thành tiền), thuế suất VAT, tổng trước thuế, tiền thuế, tổng thanh toán, tiền tệ.\n- Dòng hàng trong PO nằm ở cột \"Hàng hóa (JSON)\". Ghép dòng theo ý nghĩa mô tả, không cần trùng chữ.\n- Chênh lệch làm tròn dưới 1.000 đồng do làm tròn thuế được coi là khớp.\n- Hóa đơn giao một phần (số lượng nhỏ hơn PO, đơn giá đúng) ghi trang_thai = \"Lệch\" và nêu rõ \"giao một phần\".\n- trang_thai chỉ là một trong: \"Khớp\", \"Lệch\", \"Không tìm thấy PO\".\n- chenh_lech_tong_tien = tổng thanh toán hóa đơn trừ tổng thanh toán PO.\n- chi_tiet_chenh_lech liệt kê cụ thể từng điểm lệch kèm số liệu. Văn bản thuần, tiếng Việt."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "id": "2c910b0e-9b11-4d5d-b8c6-3a27aa78d6d2",
+      "name": "AI đối chiếu hóa đơn với PO",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        2224,
+        1552
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5.4-mini",
+          "cachedResultName": "gpt-5.4-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "id": "9e425b60-d158-4b50-9d4b-ac4b28ebe9e8",
+      "name": "Model đối chiếu",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        2080,
+        1760
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": null,
+          "name": "Gateway credits",
+          "__aiGatewayManaged": true
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"trang_thai\": \"Khớp\",\n  \"chenh_lech_tong_tien\": 0,\n  \"chi_tiet_chenh_lech\": \"Không có chênh lệch\",\n  \"doi_chieu_tung_dong\": \"1. Giấy A4: PO 10 x 500000 | HĐ 10 x 500000 -> Khớp\",\n  \"ghi_chu\": \"\"\n}"
+      },
+      "id": "54bede50-7ebb-46c2-97c3-d8768b961027",
+      "name": "Cấu trúc kết quả đối chiếu",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        2368,
+        1776
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1TZ6hIhJLFSd5q5ghe6Bn6lBSOxzYRR1zyrH-_gsx26M/edit?usp=sharing",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "HETHONGTAIKHOAN",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "c9b128d3-bbcf-4a44-ac93-9cc288fc9404",
+      "name": "Đọc hệ thống tài khoản",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2704,
+        1552
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GJZPLR5omAjiIYLH",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "accounts",
+        "options": {}
+      },
+      "id": "cd4cf59a-5a52-460f-a792-0ba25f05fa9a",
+      "name": "Gom hệ thống tài khoản",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        2928,
+        1552
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ 'HỆ THỐNG TÀI KHOẢN CỦA CÔNG TY: ' + JSON.stringify($json.accounts) + String.fromCharCode(10) + String.fromCharCode(10) + 'HÓA ĐƠN: ' + JSON.stringify($('Tìm PO tương ứng').first().json.invoice) + String.fromCharCode(10) + String.fromCharCode(10) + 'PO: ' + JSON.stringify($('Tìm PO tương ứng').first().json.po) + String.fromCharCode(10) + String.fromCharCode(10) + 'KẾT QUẢ ĐỐI CHIẾU: ' + JSON.stringify($('AI đối chiếu hóa đơn với PO').first().json.output) }}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "Bạn là kế toán tổng hợp. Đề xuất bút toán hạch toán cho hóa đơn mua vào.\nQuy tắc:\n- CHỈ dùng số tài khoản có trong hệ thống tài khoản của công ty được cung cấp. Không tự tạo tài khoản ngoài danh sách.\n- Xác định bản chất chi phí/tài sản từ nội dung hàng hóa, dịch vụ (hàng hóa, nguyên vật liệu, công cụ dụng cụ, tài sản cố định, chi phí dịch vụ...).\n- Tách bút toán tiền hàng và bút toán thuế GTGT đầu vào (nếu có).\n- Tổng số tiền các bút toán phải bằng tổng thanh toán của hóa đơn.\n- Nếu không chắc chắn, chọn tài khoản phù hợp nhất, đặt do_tin_cay = \"Thấp\" và nêu lý do.\n- do_tin_cay chỉ là \"Cao\", \"Trung bình\" hoặc \"Thấp\". Văn bản thuần, tiếng Việt."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "id": "6057b4bb-a922-454f-ac5c-ea391f3f6bea",
+      "name": "AI đề xuất hạch toán",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        3152,
+        1552
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5.4-mini",
+          "cachedResultName": "gpt-5.4-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "id": "112a9ec9-865c-4958-9c13-44b290c908d3",
+      "name": "Model hạch toán",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        3168,
+        1776
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": null,
+          "name": "Gateway credits",
+          "__aiGatewayManaged": true
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"but_toan\": [\n    { \"tai_khoan_no\": \"1561\", \"ten_tk_no\": \"Giá mua hàng hóa\", \"tai_khoan_co\": \"331\", \"ten_tk_co\": \"Phải trả người bán\", \"so_tien\": 5000000, \"dien_giai\": \"Mua giấy A4 theo HĐ 0001234\" },\n    { \"tai_khoan_no\": \"1331\", \"ten_tk_no\": \"Thuế GTGT được khấu trừ\", \"tai_khoan_co\": \"331\", \"ten_tk_co\": \"Phải trả người bán\", \"so_tien\": 500000, \"dien_giai\": \"Thuế GTGT HĐ 0001234\" }\n  ],\n  \"ly_do\": \"Hàng hóa mua để bán, nhập kho\",\n  \"do_tin_cay\": \"Cao\"\n}"
+      },
+      "id": "fc6082e5-7b20-4840-a7da-26b6146d89c5",
+      "name": "Cấu trúc bút toán",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        3296,
+        1776
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "h1",
+              "name": "Ngày xử lý",
+              "type": "string",
+              "value": "={{ $now.toFormat('yyyy-MM-dd HH:mm') }}"
+            },
+            {
+              "id": "h2",
+              "name": "Email người gửi",
+              "type": "string",
+              "value": "={{ $('Tìm PO tương ứng').first().json.email.from }}"
+            },
+            {
+              "id": "h3",
+              "name": "Tiêu đề email",
+              "type": "string",
+              "value": "={{ $('Tìm PO tương ứng').first().json.email.subject }}"
+            },
+            {
+              "id": "h4",
+              "name": "Tên file",
+              "type": "string",
+              "value": "={{ $('Tìm PO tương ứng').first().json.email.fileName }}"
+            },
+            {
+              "id": "h5",
+              "name": "Số hóa đơn",
+              "type": "string",
+              "value": "={{ $('Tìm PO tương ứng').first().json.invoice.so_hoa_don }}"
+            },
+            {
+              "id": "h6",
+              "name": "Ký hiệu hóa đơn",
+              "type": "string",
+              "value": "={{ $('Tìm PO tương ứng').first().json.invoice.ky_hieu_hoa_don }}"
+            },
+            {
+              "id": "h7",
+              "name": "Ngày hóa đơn",
+              "type": "string",
+              "value": "={{ $('Tìm PO tương ứng').first().json.invoice.ngay_hoa_don }}"
+            },
+            {
+              "id": "h8",
+              "name": "Nhà cung cấp",
+              "type": "string",
+              "value": "={{ $('Tìm PO tương ứng').first().json.invoice.nha_cung_cap }}"
+            },
+            {
+              "id": "h9",
+              "name": "MST NCC",
+              "type": "string",
+              "value": "={{ $('Tìm PO tương ứng').first().json.invoice.mst_nha_cung_cap }}"
+            },
+            {
+              "id": "h10",
+              "name": "Hàng hóa",
+              "type": "string",
+              "value": "={{ ($('Tìm PO tương ứng').first().json.invoice.hang_hoa || []).map((h, i) => (i + 1) + '. ' + h.mo_ta + ' | SL ' + h.so_luong + ' ' + (h.don_vi || '') + ' x ' + h.don_gia + ' = ' + h.thanh_tien).join(String.fromCharCode(10)) }}"
+            },
+            {
+              "id": "h11",
+              "name": "Tổng trước thuế",
+              "type": "number",
+              "value": "={{ Number($('Tìm PO tương ứng').first().json.invoice.tong_tien_truoc_thue) || 0 }}"
+            },
+            {
+              "id": "h12",
+              "name": "Tiền thuế VAT",
+              "type": "number",
+              "value": "={{ Number($('Tìm PO tương ứng').first().json.invoice.tien_thue_vat) || 0 }}"
+            },
+            {
+              "id": "h13",
+              "name": "Tổng thanh toán",
+              "type": "number",
+              "value": "={{ Number($('Tìm PO tương ứng').first().json.invoice.tong_tien_thanh_toan) || 0 }}"
+            },
+            {
+              "id": "h14",
+              "name": "Hạn thanh toán",
+              "type": "string",
+              "value": "={{ $('Tìm PO tương ứng').first().json.invoice.han_thanh_toan }}"
+            },
+            {
+              "id": "h15",
+              "name": "Số PO khớp",
+              "type": "string",
+              "value": "={{ $('Tìm PO tương ứng').first().json.po ? $('Tìm PO tương ứng').first().json.po['Số PO'] : '' }}"
+            },
+            {
+              "id": "h16",
+              "name": "Cách tìm PO",
+              "type": "string",
+              "value": "={{ $('Tìm PO tương ứng').first().json.cachKhop }}"
+            },
+            {
+              "id": "h17",
+              "name": "Trạng thái đối chiếu",
+              "type": "string",
+              "value": "={{ $('AI đối chiếu hóa đơn với PO').first().json.output.trang_thai }}"
+            },
+            {
+              "id": "h18",
+              "name": "Chênh lệch tổng tiền",
+              "type": "number",
+              "value": "={{ Number($('AI đối chiếu hóa đơn với PO').first().json.output.chenh_lech_tong_tien) || 0 }}"
+            },
+            {
+              "id": "h19",
+              "name": "Chi tiết chênh lệch",
+              "type": "string",
+              "value": "={{ $('AI đối chiếu hóa đơn với PO').first().json.output.chi_tiet_chenh_lech }}"
+            },
+            {
+              "id": "h20",
+              "name": "Đối chiếu từng dòng",
+              "type": "string",
+              "value": "={{ $('AI đối chiếu hóa đơn với PO').first().json.output.doi_chieu_tung_dong }}"
+            },
+            {
+              "id": "h21",
+              "name": "Bút toán đề xuất",
+              "type": "string",
+              "value": "={{ ($json.output.but_toan || []).map(b => 'Nợ ' + b.tai_khoan_no + ' / Có ' + b.tai_khoan_co + ': ' + b.so_tien + ' - ' + b.dien_giai).join(String.fromCharCode(10)) }}"
+            },
+            {
+              "id": "h22",
+              "name": "TK Nợ",
+              "type": "string",
+              "value": "={{ [...new Set(($json.output.but_toan || []).map(b => b.tai_khoan_no))].join(', ') }}"
+            },
+            {
+              "id": "h23",
+              "name": "TK Có",
+              "type": "string",
+              "value": "={{ [...new Set(($json.output.but_toan || []).map(b => b.tai_khoan_co))].join(', ') }}"
+            },
+            {
+              "id": "h24",
+              "name": "Lý do hạch toán",
+              "type": "string",
+              "value": "={{ $json.output.ly_do }}"
+            },
+            {
+              "id": "h25",
+              "name": "Độ tin cậy",
+              "type": "string",
+              "value": "={{ $json.output.do_tin_cay }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "013bfeb0-84d6-455b-b40d-36de7b49dd6b",
+      "name": "Định dạng dòng hóa đơn",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        3504,
+        1552
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1TZ6hIhJLFSd5q5ghe6Bn6lBSOxzYRR1zyrH-_gsx26M/edit?usp=sharing",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "HOADON",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Ngày xử lý",
+              "displayName": "Ngày xử lý",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Email người gửi",
+              "displayName": "Email người gửi",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Tiêu đề email",
+              "displayName": "Tiêu đề email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Tên file",
+              "displayName": "Tên file",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Số hóa đơn",
+              "displayName": "Số hóa đơn",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Ký hiệu hóa đơn",
+              "displayName": "Ký hiệu hóa đơn",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Ngày hóa đơn",
+              "displayName": "Ngày hóa đơn",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Nhà cung cấp",
+              "displayName": "Nhà cung cấp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "MST NCC",
+              "displayName": "MST NCC",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Hàng hóa",
+              "displayName": "Hàng hóa",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Tổng trước thuế",
+              "displayName": "Tổng trước thuế",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Tiền thuế VAT",
+              "displayName": "Tiền thuế VAT",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Tổng thanh toán",
+              "displayName": "Tổng thanh toán",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Hạn thanh toán",
+              "displayName": "Hạn thanh toán",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Số PO khớp",
+              "displayName": "Số PO khớp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Cách tìm PO",
+              "displayName": "Cách tìm PO",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Trạng thái đối chiếu",
+              "displayName": "Trạng thái đối chiếu",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Chênh lệch tổng tiền",
+              "displayName": "Chênh lệch tổng tiền",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Chi tiết chênh lệch",
+              "displayName": "Chi tiết chênh lệch",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Đối chiếu từng dòng",
+              "displayName": "Đối chiếu từng dòng",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Bút toán đề xuất",
+              "displayName": "Bút toán đề xuất",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "TK Nợ",
+              "displayName": "TK Nợ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "TK Có",
+              "displayName": "TK Có",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Lý do hạch toán",
+              "displayName": "Lý do hạch toán",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Độ tin cậy",
+              "displayName": "Độ tin cậy",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "0f18605d-355b-4b30-a15e-27754c538c4d",
+      "name": "Lưu hóa đơn vào Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3728,
+        1552
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GJZPLR5omAjiIYLH",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "markAsRead",
+        "messageId": "={{ $('Tìm PO tương ứng').first().json.email.id }}"
+      },
+      "id": "f12c4a4e-a6a6-4b19-a9ec-d5396dc22556",
+      "name": "Đánh dấu email đã xử lý",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3952,
+        1552
+      ],
+      "webhookId": "d8d7b0c1-dfd4-407f-a889-800d79aeb036",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Hwx8cy1L0aPTxLHZ",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ \"\" }}Chép lại chính xác và đầy đủ toàn bộ chữ, số, bảng biểu trong ảnh chứng từ này dưới dạng văn bản thuần. Giữ nguyên số liệu, không tóm tắt, không thêm bình luận.",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "HumanMessagePromptTemplate",
+              "messageType": "imageBinary",
+              "imageDetail": "high"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "id": "12727d15-9856-4df4-aa0a-5ab620d59c8e",
+      "name": "Đọc chữ ảnh hóa đơn",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        592,
+        1344
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Tải lên PO": {
+      "main": [
+        [
+          {
+            "node": "Chuẩn hoá file PO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chuẩn hoá file PO": {
+      "main": [
+        [
+          {
+            "node": "PO là PDF?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PO là PDF?": {
+      "main": [
+        [
+          {
+            "node": "Đọc chữ PDF PO",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Đọc chữ ảnh PO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Đọc chữ PDF PO": {
+      "main": [
+        [
+          {
+            "node": "Nội dung PO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nội dung PO": {
+      "main": [
+        [
+          {
+            "node": "AI trích xuất thông tin PO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI trích xuất thông tin PO": {
+      "main": [
+        [
+          {
+            "node": "Định dạng dòng PO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Model trích xuất PO": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI trích xuất thông tin PO",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cấu trúc PO": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI trích xuất thông tin PO",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Định dạng dòng PO": {
+      "main": [
+        [
+          {
+            "node": "Lưu PO vào Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Đọc chữ ảnh PO": {
+      "main": [
+        [
+          {
+            "node": "Nội dung PO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Model đọc ảnh PO": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Đọc chữ ảnh PO",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email hóa đơn mới": {
+      "main": [
+        [
+          {
+            "node": "Chuẩn hoá file hóa đơn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chuẩn hoá file hóa đơn": {
+      "main": [
+        [
+          {
+            "node": "Hóa đơn là PDF?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hóa đơn là PDF?": {
+      "main": [
+        [
+          {
+            "node": "Đọc chữ PDF hóa đơn",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Đọc chữ ảnh hóa đơn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Đọc chữ PDF hóa đơn": {
+      "main": [
+        [
+          {
+            "node": "Nội dung hóa đơn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nội dung hóa đơn": {
+      "main": [
+        [
+          {
+            "node": "AI trích xuất hóa đơn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI trích xuất hóa đơn": {
+      "main": [
+        [
+          {
+            "node": "Đọc danh sách PO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Model đọc hóa đơn": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI trích xuất hóa đơn",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Đọc chữ ảnh hóa đơn",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cấu trúc hóa đơn": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI trích xuất hóa đơn",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Đọc danh sách PO": {
+      "main": [
+        [
+          {
+            "node": "Tìm PO tương ứng",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tìm PO tương ứng": {
+      "main": [
+        [
+          {
+            "node": "AI đối chiếu hóa đơn với PO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI đối chiếu hóa đơn với PO": {
+      "main": [
+        [
+          {
+            "node": "Đọc hệ thống tài khoản",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Model đối chiếu": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI đối chiếu hóa đơn với PO",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cấu trúc kết quả đối chiếu": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI đối chiếu hóa đơn với PO",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Đọc hệ thống tài khoản": {
+      "main": [
+        [
+          {
+            "node": "Gom hệ thống tài khoản",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gom hệ thống tài khoản": {
+      "main": [
+        [
+          {
+            "node": "AI đề xuất hạch toán",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI đề xuất hạch toán": {
+      "main": [
+        [
+          {
+            "node": "Định dạng dòng hóa đơn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Model hạch toán": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI đề xuất hạch toán",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cấu trúc bút toán": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI đề xuất hạch toán",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Định dạng dòng hóa đơn": {
+      "main": [
+        [
+          {
+            "node": "Lưu hóa đơn vào Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lưu hóa đơn vào Sheet": {
+      "main": [
+        [
+          {
+            "node": "Đánh dấu email đã xử lý",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Đọc chữ ảnh hóa đơn": {
+      "main": [
+        [
+          {
+            "node": "Nội dung hóa đơn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "005e7f0e-5b36-4b82-8208-78b548d3a9b6",
+  "meta": {
+    "instanceId": "a08b8dd6a16e31f84115a66dff67c1195fca40b9a7bdec4ce0b21b91a449cba5"
+  },
+  "nodeGroups": [
+    {
+      "id": "86ccbf44-ff3c-426c-b47f-aa13471892bb",
+      "name": "Đọc file PO",
+      "nodeIds": [
+        "49ff39c3-ea77-4415-96e5-7f897ca40468",
+        "b645edf6-02c1-4d93-b6d5-c8f61dc1da7d",
+        "9e12dd18-c5ae-4286-a4c4-918272a2e54a",
+        "4c4b0f32-8f49-463b-903d-7e5c364adac2",
+        "01b70f4d-e98b-49db-ae33-273c516db691",
+        "a9e3b0a6-d0c3-4813-8fd8-dbfb9c8c26cd"
+      ],
+      "description": "Nhận file PO từ form; PDF được đọc chữ trực tiếp, ảnh được AI đọc thành văn bản"
+    },
+    {
+      "id": "f78d2746-6cf8-4a9f-9f4a-b8773fa99152",
+      "name": "Trích xuất & lưu PO",
+      "nodeIds": [
+        "11cd5376-720a-4768-8b90-348fb1d55b6c",
+        "ecc3e34e-973f-4243-84ec-f684282c5f35",
+        "02c9e3b9-b841-4f82-85ff-0bc84462e2cc",
+        "7c463ca4-2a3e-4fa3-b3a7-955d7ab2a3b5",
+        "8acf9aa0-c5c9-4a04-8f20-f8d413b22899"
+      ],
+      "description": "AI lấy số PO, nhà cung cấp, MST, dòng hàng, tổng tiền; ghi một dòng vào tab PO"
+    },
+    {
+      "id": "88ebf3bc-5b73-4a9e-8c32-c70624818fbc",
+      "name": "Đọc hóa đơn từ email",
+      "nodeIds": [
+        "53764e42-7f53-424e-ad6c-9b84c139c098",
+        "e054cefb-80cd-4bbf-900c-d68e67c2b23a",
+        "8f706fff-d1ff-4959-a4d1-75f2c0639a88",
+        "12727d15-9856-4df4-aa0a-5ab620d59c8e",
+        "2995eae5-858f-4086-b3ff-c277e4cd8dc5",
+        "42d9c42c-c2d4-4fc5-8e87-00ec864134dd",
+        "c5b1e919-bd01-4e07-a876-16a31b677fcb",
+        "c5c76920-5443-499b-b25b-cee630853b44"
+      ],
+      "description": "Lấy file PDF/ảnh đính kèm email, AI đọc số hóa đơn, nhà cung cấp, dòng hàng và tiền thuế"
+    },
+    {
+      "id": "160faa5f-e1bc-480e-84fa-5636e1512cc3",
+      "name": "Đối chiếu với PO",
+      "nodeIds": [
+        "6e7f6389-7702-4104-9ecf-4501880bd74e",
+        "0d716755-9ae9-4251-b1c2-425f8114d643",
+        "2c910b0e-9b11-4d5d-b8c6-3a27aa78d6d2",
+        "9e425b60-d158-4b50-9d4b-ac4b28ebe9e8",
+        "54bede50-7ebb-46c2-97c3-d8768b961027"
+      ],
+      "description": "Tìm PO theo số PO, MST hoặc tên nhà cung cấp; AI so từng dòng hàng, đơn giá, thuế và tổng tiền"
+    },
+    {
+      "id": "603db7cc-7e12-4c19-8ab1-441bd66ab074",
+      "name": "Hạch toán & lưu hóa đơn",
+      "nodeIds": [
+        "c9b128d3-bbcf-4a44-ac93-9cc288fc9404",
+        "cd4cf59a-5a52-460f-a792-0ba25f05fa9a",
+        "6057b4bb-a922-454f-ac5c-ea391f3f6bea",
+        "112a9ec9-865c-4958-9c13-44b290c908d3",
+        "fc6082e5-7b20-4840-a7da-26b6146d89c5",
+        "013bfeb0-84d6-455b-b40d-36de7b49dd6b",
+        "0f18605d-355b-4b30-a15e-27754c538c4d",
+        "f12c4a4e-a6a6-4b19-a9ec-d5396dc22556"
+      ],
+      "description": "AI đề xuất bút toán Nợ/Có theo hệ thống tài khoản riêng, ghi vào tab HoaDon rồi đánh dấu email đã đọc"
+    }
+  ],
+  "id": "SWbwz9aZxKyB4iHG",
+  "tags": []
+}
